@@ -1,0 +1,2314 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>3D 粒子圣诞树 · Merry Christmas</title>
+<style>
+  :root{
+    --gold: #ffd98a;
+    --panel: rgba(9,17,33,.62);
+    --line: rgba(255,214,140,.18);
+    --text: #eaf1ff;
+  }
+  *{ box-sizing: border-box; }
+  html,body{ height:100%; margin:0; }
+  body{
+    background:
+      radial-gradient(120% 85% at 50% 0%, #12233c 0%, #0a1428 36%, #050a16 64%, #02040a 100%);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    overflow: hidden;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+    cursor: grab;
+  }
+  body.dragging{ cursor: grabbing; }
+
+  /* ---------- 画布：星空 + 3D 粒子树 + 飘雪 ---------- */
+  #scene{
+    position: fixed; inset: 0; z-index: 1;
+    display: block; width: 100%; height: 100%;
+    pointer-events: none;
+  }
+  #hangLayer{
+    position: fixed; inset: 0; z-index: 2;
+    pointer-events: none;
+  }
+
+  /* ---------- 挂饰相框（外层负责 3D 定位与缩放，内层负责摆动） ---------- */
+  .ornament{
+    position: absolute;
+    width: var(--w, 96px);
+    padding: 0; margin: 0;
+    border: 0; background: none;
+    cursor: pointer;
+    pointer-events: auto;
+    transform: translate(-50%, 0) scale(var(--k, 1));
+    transform-origin: 50% 0;
+    will-change: transform, left, top;
+  }
+  .ornament-inner{
+    display: flex; flex-direction: column; align-items: center;
+    transform-origin: 50% 0;
+    animation: swing var(--dur, 7s) ease-in-out var(--delay, 0s) infinite alternate;
+  }
+  .ornament:hover{ z-index: 60; }
+  @keyframes swing{
+    from{ transform: rotate(-2.4deg); }
+    to  { transform: rotate(2.4deg); }
+  }
+
+  .rope{
+    width: 2px; height: 10px;
+    background: linear-gradient(180deg, rgba(255,214,140,.85), rgba(255,214,140,.12));
+  }
+  .cap{
+    width: 7px; height: 7px; border-radius: 50%;
+    margin-bottom: -3px; z-index: 2;
+    background: radial-gradient(circle at 35% 30%, #fff3c4, #d09a3c 62%, #7d4c10);
+    box-shadow: 0 0 10px rgba(255,200,110,.75);
+  }
+  .frame{
+    position: relative;
+    display: block; width: 100%; aspect-ratio: 1 / 1;
+    padding: 3px; border-radius: 9px;
+    background: linear-gradient(150deg, #ffeec2, #e0a94e 42%, #a8721f 70%, #6d4310);
+    box-shadow: 0 8px 18px rgba(0,0,0,.5), 0 0 16px rgba(255,180,80,.18);
+    transition: transform .25s ease, box-shadow .25s ease;
+  }
+  .ornament:hover .frame{
+    transform: scale(1.1);
+    box-shadow: 0 10px 22px rgba(0,0,0,.55), 0 0 26px rgba(255,190,90,.45);
+  }
+  .frame > img{
+    position: absolute; inset: 3px;
+    width: calc(100% - 6px); height: calc(100% - 6px);
+    object-fit: cover; border-radius: 7px; display: block;
+  }
+  .frame > .plus{
+    position: absolute; inset: 3px;
+    display: grid; place-items: center;
+    border-radius: 7px;
+    background: rgba(255,255,255,.05);
+    border: 1.5px dashed rgba(255,214,140,.6);
+    font-size: 14px; color: rgba(255,222,160,.95);
+    text-shadow: 0 0 12px rgba(255,190,90,.45);
+  }
+  .ornament.empty .frame{
+    background: rgba(255,255,255,.05);
+    border: 1px solid rgba(255,214,140,.34);
+    box-shadow: 0 0 18px rgba(255,180,80,.1);
+  }
+  .ornament.flip .frame{ animation: pop .42s ease; }
+  @keyframes pop{
+    0%{ opacity:.2; transform: scale(.9); }
+    100%{ opacity:1; transform: scale(1); }
+  }
+
+  /* ---------- 顶部标题 ---------- */
+  .hero{
+    position: fixed; left: 50%; top: 14px; transform: translateX(-50%);
+    z-index: 4; text-align: center; pointer-events: none; white-space: nowrap;
+  }
+  .hero h1{
+    margin: 0;
+    font-family: Georgia, "Times New Roman", serif;
+    font-weight: 400;
+    font-size: clamp(17px, 2.6vw, 34px);
+    letter-spacing: .3em; text-indent: .3em;
+    background: linear-gradient(180deg, #fffdf0, #ffe0a1 45%, #ffb057 78%, #ff8d3e);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    filter: drop-shadow(0 0 18px rgba(255,190,90,.35));
+  }
+  .hero p{
+    margin: 6px 0 0;
+    font-size: clamp(9px, .9vw, 11px);
+    letter-spacing: .3em; text-indent: .3em;
+    color: rgba(176,196,228,.58);
+  }
+
+  /* ---------- 操作按钮 ---------- */
+  .actions{
+    position: fixed; top: 14px; right: 14px;
+    display: flex; gap: 8px; z-index: 6;
+  }
+  .btn{
+    display: inline-flex; align-items: center; gap: 7px;
+    height: 38px; padding: 0 14px;
+    border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: #f3e6c8;
+    font-size: 12.5px; letter-spacing: .04em;
+    font-family: inherit;
+    -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+    transition: transform .18s, border-color .18s, background .18s, opacity .18s;
+  }
+  .btn:hover{ transform: translateY(-1px); border-color: rgba(255,214,140,.45); background: rgba(24,36,58,.82); }
+  .btn:active{ transform: translateY(0) scale(.98); }
+  .btn.primary{
+    background: linear-gradient(160deg, rgba(255,215,140,.2), rgba(201,138,46,.18));
+    border-color: rgba(255,214,140,.5);
+    color: #ffe9b8;
+    box-shadow: 0 8px 24px rgba(255,170,60,.12);
+  }
+  .btn:disabled{ opacity: .35; cursor: not-allowed; transform: none; }
+  .btn .ico{ font-size: 14px; line-height: 1; }
+  .btn[aria-pressed="false"]{ opacity: .6; }
+  .btn.on{
+    border-color: rgba(150,222,255,.55);
+    color: #d6efff;
+    background: rgba(20,52,80,.72);
+    box-shadow: 0 0 22px rgba(80,180,255,.18);
+  }
+
+  /* ---------- 手动手势工具条（无摄像头时使用） ---------- */
+  .gesture-bar{
+    position: fixed; left: 50%;
+    bottom: calc(94px + env(safe-area-inset-bottom, 0px));
+    transform: translateX(-50%);
+    z-index: 6;
+    display: flex; align-items: center; gap: 7px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    box-shadow: 0 14px 34px rgba(0,0,0,.4);
+    -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+  }
+  .gesture-bar[hidden]{ display: none; }
+  .gbar-hint{
+    font-size: 11px; letter-spacing: .12em;
+    color: rgba(176,196,228,.6);
+    padding: 0 4px 0 6px;
+  }
+  .gbtn{
+    height: 30px; padding: 0 11px;
+    font-size: 11.5px;
+    background: rgba(255,255,255,.04);
+  }
+
+  /* ---------- 摄像头面板 ---------- */
+  .cam-panel{
+    position: fixed; left: 16px; top: 92px; z-index: 7;
+    width: 172px; padding: 9px;
+    border-radius: 16px;
+    background: rgba(9,17,33,.74);
+    border: 1px solid var(--line);
+    box-shadow: 0 18px 40px rgba(0,0,0,.45);
+    -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+    display: none;
+  }
+  .cam-panel.on{ display: block; }
+  .cam-panel video{
+    display: block; width: 100%; aspect-ratio: 4 / 3;
+    border-radius: 11px; object-fit: cover;
+    background: #000;
+    transform: scaleX(-1);
+  }
+  .cam-state{
+    margin-top: 8px;
+    font-size: 11px; letter-spacing: .04em;
+    color: #cfe6ff;
+  }
+  .cam-tip{
+    margin-top: 4px;
+    font-size: 10px; line-height: 1.45;
+    color: rgba(176,196,228,.55);
+  }
+  .cam-gesture{
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid rgba(255,214,140,.14);
+    font-size: 11px; letter-spacing: .04em;
+    color: rgba(255,222,160,.9);
+  }
+
+  /* ---------- 底部胶片条 ---------- */
+  .dock{
+    position: fixed; left: 50%;
+    bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+    transform: translateX(-50%);
+    z-index: 5;
+    max-width: min(94vw, 880px);
+  }
+  .dock[hidden]{ display: none; }
+  .filmstrip{
+    display: flex; gap: 8px;
+    padding: 8px;
+    border-radius: 18px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    box-shadow: 0 18px 50px rgba(0,0,0,.5);
+    -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+    overflow-x: auto; scrollbar-width: thin;
+  }
+  .thumb{
+    position: relative; flex: 0 0 auto;
+    width: 52px; height: 52px;
+    padding: 0; margin: 0;
+    border-radius: 11px; overflow: hidden;
+    border: 1px solid rgba(255,255,255,.14);
+    background: #0b1526; cursor: pointer;
+    transition: transform .18s, border-color .18s, box-shadow .18s;
+  }
+  .thumb img{ width: 100%; height: 100%; object-fit: cover; display: block; }
+  .thumb:hover{ transform: translateY(-2px); border-color: rgba(255,214,140,.55); }
+  .thumb.active{
+    border-color: var(--gold);
+    box-shadow: 0 0 0 1px var(--gold), 0 0 18px rgba(255,190,90,.35);
+  }
+  .thumb.add{
+    display: grid; place-items: center;
+    font-size: 20px; color: rgba(255,214,140,.85);
+    border-style: dashed; background: rgba(255,255,255,.03);
+  }
+
+  /* ---------- 大图灯箱 ---------- */
+  .lightbox{
+    position: fixed; inset: 0; z-index: 30;
+    display: grid; place-items: center;
+    opacity: 0; pointer-events: none;
+    transition: opacity .3s ease;
+  }
+  .lightbox.open{ opacity: 1; pointer-events: auto; }
+  .lightbox.soft .lb-backdrop{ background: rgba(2,5,12,.58); }
+  .lb-backdrop{
+    position: absolute; inset: 0;
+    background: rgba(2,5,12,.86);
+    -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+  }
+  .lb-figure{
+    position: relative; z-index: 2; margin: 0; text-align: center;
+    pointer-events: none;
+  }
+  .lb-figure img{
+    display: block;
+    max-width: min(86vw, 920px);
+    max-height: 70vh;
+    border-radius: 14px;
+    background: #08101f;
+    box-shadow: 0 30px 90px rgba(0,0,0,.7), 0 0 0 1px rgba(255,214,140,.22);
+  }
+  .lb-figure img.swap{ animation: lbIn .34s ease; }
+  @keyframes lbIn{
+    from{ opacity:.35; transform: scale(.985); }
+    to  { opacity:1;   transform: scale(1); }
+  }
+  .lb-figure figcaption{
+    margin-top: 14px;
+    font-size: 12.5px; letter-spacing: .18em;
+    color: rgba(214,228,252,.72);
+  }
+  .lb-nav{
+    position: absolute; top: 50%; transform: translateY(-50%);
+    width: 46px; height: 46px; border-radius: 50%;
+    display: grid; place-items: center;
+    border: 1px solid var(--line);
+    background: rgba(10,18,33,.62);
+    color: #ffe6b0; font-size: 24px; line-height: 1;
+    cursor: pointer; z-index: 3;
+    font-family: inherit;
+    -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+    transition: background .2s, border-color .2s;
+  }
+  .lb-nav:hover{ background: rgba(30,44,70,.88); border-color: rgba(255,214,140,.5); }
+  .lb-nav.prev{ left: max(14px, 3vw); }
+  .lb-nav.next{ right: max(14px, 3vw); }
+  .lb-tools{
+    position: absolute; left: 50%;
+    bottom: calc(22px + env(safe-area-inset-bottom, 0px));
+    transform: translateX(-50%);
+    z-index: 3;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .lb-counter{
+    font-size: 12px; letter-spacing: .16em;
+    color: rgba(206,222,248,.7);
+    padding: 0 6px;
+  }
+  .lb-del{
+    border-color: rgba(255,120,120,.28);
+    color: #ffb3b3;
+  }
+  .lb-del:hover{ border-color: rgba(255,120,120,.6); background: rgba(70,18,24,.6); }
+
+  /* ---------- 手势提示 ---------- */
+  .toast{
+    position: fixed; left: 50%;
+    bottom: calc(152px + env(safe-area-inset-bottom, 0px));
+    transform: translate(-50%, 12px);
+    z-index: 25;
+    padding: 10px 22px;
+    border-radius: 999px;
+    background: rgba(12,22,40,.84);
+    border: 1px solid rgba(255,214,140,.4);
+    color: #ffe9b8;
+    font-size: 13px; letter-spacing: .1em;
+    box-shadow: 0 12px 30px rgba(0,0,0,.45);
+    opacity: 0; pointer-events: none;
+    transition: opacity .26s ease, transform .26s ease;
+    white-space: nowrap;
+  }
+  .toast.show{ opacity: 1; transform: translate(-50%, 0); }
+
+  /* ---------- 拖拽提示 ---------- */
+  .drop-hint{
+    position: fixed; inset: 0; z-index: 40;
+    display: grid; place-items: center;
+    background: rgba(3,8,18,.7);
+    -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+    opacity: 0; pointer-events: none;
+    transition: opacity .2s;
+  }
+  .drop-hint.show{ opacity: 1; }
+  .drop-hint span{
+    padding: 22px 34px;
+    border-radius: 18px;
+    border: 1.5px dashed rgba(255,214,140,.55);
+    color: #ffe9b8;
+    font-size: 14px; letter-spacing: .12em;
+    background: rgba(12,22,40,.7);
+  }
+
+  /* ---------- 小屏适配 ---------- */
+  @media (max-width: 760px){
+    .hero{ top: 10px; }
+    .actions{
+      top: auto; right: auto; left: 50%;
+      bottom: calc(104px + env(safe-area-inset-bottom, 0px));
+      transform: translateX(-50%);
+    }
+    .btn{ height: 36px; padding: 0 11px; font-size: 11.5px; }
+    .gesture-bar{ bottom: calc(150px + env(safe-area-inset-bottom, 0px)); }
+    .gbtn{ height: 28px; padding: 0 9px; font-size: 11px; }
+    .gbar-hint{ display: none; }
+    .toast{ bottom: calc(198px + env(safe-area-inset-bottom, 0px)); font-size: 12px; }
+    .cam-panel{ left: 10px; top: 70px; width: 126px; padding: 7px; }
+    .cam-state{ font-size: 10px; }
+    .cam-tip{ display: none; }
+    .lb-nav{ width: 40px; height: 40px; font-size: 20px; }
+    .lb-figure img{ max-width: 90vw; max-height: 62vh; }
+    .lb-tools{ bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
+  }
+</style>
+</head>
+<body>
+
+<canvas id="scene"></canvas>
+<div id="hangLayer"></div>
+
+<header class="hero">
+  <h1>Merry Christmas</h1>
+  <p id="heroSub">握拳收拢 · 张开绽放 · 比 OK 弹照片 · 拖动可旋转</p>
+</header>
+
+<div class="actions">
+  <button type="button" class="btn" id="btnCore" title="粒子乱飞 3 秒后拼出「圣诞节快乐」" aria-pressed="false">
+    <span class="ico">芯</span><span class="label">芯</span>
+  </button>
+  <button type="button" class="btn" id="btnCam" title="开启摄像头，用人脸距离控制树的大小" aria-pressed="false">
+    <span class="ico">◎</span><span class="label">镜头</span>
+  </button>
+  <button type="button" class="btn primary" id="btnAdd" title="添加照片">
+    <span class="ico">＋</span><span class="label">添加照片</span>
+  </button>
+  <button type="button" class="btn" id="btnRotate" title="让树上照片自动轮换" aria-pressed="false">
+    <span class="ico">↻</span><span class="label">轮换</span>
+  </button>
+  <button type="button" class="btn" id="btnSnow" title="开关飘雪" aria-pressed="true">
+    <span class="ico">❄</span><span class="label">雪</span>
+  </button>
+</div>
+
+<div class="cam-panel" id="camPanel">
+  <video id="camVideo" autoplay playsinline muted></video>
+  <div class="cam-state" id="camState">等待人脸…</div>
+  <div class="cam-gesture" id="camGesture">手势：—</div>
+  <div class="cam-tip" id="camTip">人脸靠近 → 树放大；握拳收拢，张开绽放，比 OK 弹照片</div>
+</div>
+
+<div class="gesture-bar" id="gestureBar">
+  <span class="gbar-hint">手势</span>
+  <button type="button" class="btn gbtn" data-gesture="fist">握拳</button>
+  <button type="button" class="btn gbtn" data-gesture="open">张开</button>
+  <button type="button" class="btn gbtn" data-gesture="ok">OK</button>
+</div>
+
+<div class="dock" id="dock" hidden>
+  <div class="filmstrip" id="filmstrip"></div>
+</div>
+
+<div class="lightbox" id="lightbox" aria-hidden="true" role="dialog" aria-label="照片大图">
+  <div class="lb-backdrop" id="lbBackdrop"></div>
+  <button type="button" class="lb-nav prev" id="lbPrev" aria-label="上一张">‹</button>
+  <figure class="lb-figure" id="lbFigure">
+    <img id="lbImg" alt="">
+    <figcaption id="lbCap"></figcaption>
+  </figure>
+  <button type="button" class="lb-nav next" id="lbNext" aria-label="下一张">›</button>
+  <div class="lb-tools">
+    <span class="lb-counter" id="lbCounter"></span>
+    <button type="button" class="btn" id="lbClose">关闭</button>
+    <button type="button" class="btn lb-del" id="lbDel">移除这张</button>
+  </div>
+</div>
+
+<div class="drop-hint" id="dropHint"><span>松开鼠标，把照片挂上圣诞树</span></div>
+
+<div class="toast" id="toast"></div>
+
+<input type="file" id="fileInput" accept="image/*" multiple hidden>
+
+<script>
+(function () {
+  'use strict';
+
+  var TAU = Math.PI * 2;
+
+  /* ================================================================
+     1. 可配置区
+     ================================================================ */
+  var CONFIG = {
+    photos: [
+      // 'photo-1.jpg',
+      // 'photo-2.jpg'
+    ],
+    autoRotate: false,     // 照片多于 6 张时默认开启挂饰轮换
+    autoSpin: 0.16,        // 空闲时树的自转速度（弧度/秒），设 0 可关闭
+    gestureHoldFrames: 3,  // 手势需连续命中的帧数，越大越不易误触
+    okCooldown: 1200        // 两次 OK 手势之间的最小间隔（毫秒）
+  };
+
+  /* 挂点：t 为树高参数（0 底 / 1 尖），side 为 -1 左 / 1 右 */
+  var SLOTS = [
+    { t: 0.78, side: -1 },
+    { t: 0.78, side: 1 },
+    { t: 0.54, side: -1 },
+    { t: 0.54, side: 1 },
+    { t: 0.26, side: -1 },
+    { t: 0.26, side: 1 }
+  ];
+
+  var el = {
+    scene:      document.getElementById('scene'),
+    hangLayer:  document.getElementById('hangLayer'),
+    filmstrip:  document.getElementById('filmstrip'),
+    dock:       document.getElementById('dock'),
+    heroSub:    document.getElementById('heroSub'),
+    btnAdd:     document.getElementById('btnAdd'),
+    btnRotate:  document.getElementById('btnRotate'),
+    btnSnow:    document.getElementById('btnSnow'),
+    btnCam:     document.getElementById('btnCam'),
+    btnCore:    document.getElementById('btnCore'),
+    gestureBar: document.getElementById('gestureBar'),
+    camPanel:   document.getElementById('camPanel'),
+    camVideo:   document.getElementById('camVideo'),
+    camState:   document.getElementById('camState'),
+    camTip:     document.getElementById('camTip'),
+    camGesture: document.getElementById('camGesture'),
+    toast:      document.getElementById('toast'),
+    fileInput:  document.getElementById('fileInput'),
+    dropHint:   document.getElementById('dropHint'),
+    lightbox:   document.getElementById('lightbox'),
+    lbBackdrop: document.getElementById('lbBackdrop'),
+    lbFigure:   document.getElementById('lbFigure'),
+    lbImg:      document.getElementById('lbImg'),
+    lbCap:      document.getElementById('lbCap'),
+    lbCounter:  document.getElementById('lbCounter'),
+    lbPrev:     document.getElementById('lbPrev'),
+    lbNext:     document.getElementById('lbNext'),
+    lbClose:    document.getElementById('lbClose'),
+    lbDel:      document.getElementById('lbDel')
+  };
+
+  var ctx = el.scene.getContext('2d');
+
+  var photos = [];
+  var slotNodes = [];
+  var offset = 0;
+  var activeIndex = 0;
+  var autoRotate = !!CONFIG.autoRotate;
+  var rotateTimer = null;
+
+  /* 世界几何（以树中部为投影锚点） */
+  var geo = {
+    W: 0, H: 0,
+    cx: 0, pivotY: 0, baseY: 0,
+    treeH: 0, treeR: 0,
+    frameW: 100,
+    camDist: 1000,
+    dpr: 1
+  };
+
+  /* 视图状态：旋转 + 缩放 */
+  var view = {
+    rotY: 0.26,
+    rotX: 0.05,
+    zoom: 1,
+    zoomTarget: 1
+  };
+  var cosY = 1, sinY = 0, cosX = 1, sinX = 0;
+  var lastInteract = 0;
+
+  /* ================================================================
+     2. 布局
+     ================================================================ */
+  function layout() {
+    var W = window.innerWidth;
+    var H = window.innerHeight;
+    var small = W < 560;
+
+    var padTop = small ? 72 : 88;
+    var padBottom = small ? 146 : 112;
+    var padX = small ? 6 : 18;
+
+    var availW = Math.max(200, W - padX * 2);
+    var availH = Math.max(260, H - padTop - padBottom);
+
+    /* 放大到 1.42 倍时仍需留出余量；照片缩小一半后树可以再宽一些 */
+    var treeH = Math.min(availH / 1.2, availW / 1.06) * 0.94;
+    var frameW = Math.max(28, Math.min(56, treeH * 0.108));
+    var treeR = treeH * 0.37;
+
+    var needHalf = 0.955 * treeR + 0.52 * frameW + frameW * 0.5 + 8;
+    if (needHalf * 2 > availW) {
+      var k = availW / (needHalf * 2);
+      treeH *= k;
+      treeR *= k;
+      frameW = Math.max(46, Math.min(112, treeH * 0.215));
+    }
+
+    var blockH = treeH * 1.2;
+    var top = padTop + (availH - blockH) / 2;
+
+    geo.W = W;
+    geo.H = H;
+    geo.cx = W / 2;
+    geo.treeH = treeH;
+    geo.treeR = treeR;
+    geo.frameW = frameW;
+    geo.baseY = top + treeH * 0.155 + treeH;
+    geo.pivotY = geo.baseY - treeH * 0.52;
+    geo.camDist = treeH * 2.0;
+  }
+
+  /* ================================================================
+     3. 粒子精灵
+     ================================================================ */
+  var spriteCache = new Map();
+
+  function getSprite(rgb) {
+    var key = rgb.join(',');
+    var sp = spriteCache.get(key);
+    if (sp) return sp;
+
+    var S = 32;
+    var cv = document.createElement('canvas');
+    cv.width = cv.height = S;
+    var g = cv.getContext('2d');
+    var grd = g.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+    grd.addColorStop(0, 'rgba(255,255,255,.95)');
+    grd.addColorStop(0.22, 'rgba(' + key + ',.95)');
+    grd.addColorStop(0.55, 'rgba(' + key + ',.28)');
+    grd.addColorStop(1, 'rgba(' + key + ',0)');
+    g.fillStyle = grd;
+    g.fillRect(0, 0, S, S);
+
+    spriteCache.set(key, cv);
+    return cv;
+  }
+
+  var GREENS = [
+    [18, 110, 64],
+    [26, 142, 80],
+    [38, 174, 98],
+    [58, 202, 118],
+    [98, 228, 148],
+    [160, 246, 190]
+  ];
+  var GOLD = [255, 214, 140];
+  var WARM = [255, 138, 108];
+  var LIGHT_COLORS = [
+    [255, 214, 122],
+    [255, 122, 104],
+    [150, 220, 255],
+    [255, 246, 210],
+    [180, 255, 176],
+    [255, 168, 92]
+  ];
+
+  function greenFor(t) {
+    if (t > 0.82) return GREENS[5];
+    if (t > 0.66) return GREENS[4];
+    if (t > 0.5) return GREENS[3];
+    if (t > 0.34) return GREENS[2];
+    if (t > 0.18) return GREENS[1];
+    return GREENS[0];
+  }
+
+  /* 三层树冠：t0 层底 / t1 层尖 / rw 相对半径 / share 粒子占比 */
+  var LAYERS = [
+    { t0: 0.00, t1: 0.48, rw: 1.00, share: 0.44 },
+    { t0: 0.24, t1: 0.76, rw: 0.74, share: 0.32 },
+    { t0: 0.48, t1: 1.00, rw: 0.50, share: 0.24 }
+  ];
+
+  var BALL_COLORS = [
+    [255, 210, 122],
+    [255, 108, 96],
+    [120, 210, 255],
+    [255, 246, 214],
+    [255, 160, 80],
+    [190, 150, 255]
+  ];
+
+  /* ================================================================
+     4. 粒子数据
+     ================================================================ */
+  var particles = [];
+  var bulbs = [];
+  var balls = [];
+  var trunk = [];
+  var dust = [];
+  var flakes = [];
+  var stars = [];
+  var snowOn = true;
+  var treeState = 'tree';     // 'tree' | 'burst' | 'chaos' | 'text'
+  var textTimer = 0;
+
+  function zeroMotion(o) {
+    o.bx = 0; o.by = 0; o.bz = 0;
+    o.bvx = 0; o.bvy = 0; o.bvz = 0;
+    return o;
+  }
+
+  function buildTreeParticles() {
+    particles.length = 0;
+    bulbs.length = 0;
+    balls.length = 0;
+    trunk.length = 0;
+    dust.length = 0;
+
+    var small = window.innerWidth < 560;
+    var body = small ? 1250 : 3100;
+    var edgeN = small ? 300 : 820;
+    var bulbN = small ? 64 : 140;
+    var ballN = small ? 24 : 52;
+    var trunkN = small ? 22 : 52;
+
+    LAYERS.forEach(function (layer) {
+      var n = Math.round(body * layer.share);
+
+      for (var i = 0; i < n; i++) {
+        var u = Math.pow(Math.random(), 1.24);
+        var t = layer.t0 + (layer.t1 - layer.t0) * u;
+        var onEdge = Math.random() < 0.3;
+        var rad = onEdge ? (0.93 + Math.random() * 0.07) : Math.sqrt(Math.random());
+        var tint = null;
+        if (!onEdge) {
+          var luck = Math.random();
+          if (luck < 0.06) tint = GOLD;
+          else if (luck < 0.09) tint = WARM;
+        }
+
+        particles.push(zeroMotion({
+          t: t, t0: layer.t0, t1: layer.t1, rw: layer.rw,
+          rad: rad,
+          ang: Math.random() * TAU,
+          sw: (Math.random() < 0.5 ? -1 : 1) * (0.4 + Math.random() * 1.2),
+          vy: Math.random() < 0.3 ? 0.012 + Math.random() * 0.022 : 0,
+          size: onEdge ? 4.0 + Math.random() * 3.4 : 2.6 + Math.random() * 2.8,
+          alpha: onEdge ? 0.52 + Math.random() * 0.36 : 0.24 + Math.random() * 0.3,
+          tw: 1.1 + Math.random() * 2.6,
+          ph: Math.random() * TAU,
+          spr: getSprite(tint || greenFor(t))
+        }));
+      }
+
+      /* 每层底部的发光裙边，勾出层次 */
+      var ne = Math.round(edgeN / LAYERS.length);
+      for (var e = 0; e < ne; e++) {
+        var ang = Math.random() * TAU;
+        particles.push(zeroMotion({
+          t: layer.t0 + Math.random() * 0.06,
+          t0: layer.t0, t1: layer.t1, rw: layer.rw,
+          rad: 0.88 + Math.random() * 0.12,
+          ang: ang,
+          sw: 0,
+          vy: 0,
+          size: 4.6 + Math.random() * 3.6,
+          alpha: 0.6 + Math.random() * 0.3,
+          tw: 1.6 + Math.random() * 2.2,
+          ph: Math.random() * TAU,
+          spr: getSprite(GREENS[3 + (Math.random() < 0.35 ? 1 : 0)])
+        }));
+      }
+    });
+
+    for (var j = 0; j < bulbN; j++) {
+      var bl = LAYERS[j % LAYERS.length];
+      bulbs.push(zeroMotion({
+        t: bl.t0 + Math.random() * 0.17,
+        t0: bl.t0, t1: bl.t1, rw: bl.rw,
+        rad: 0.84 + Math.random() * 0.15,
+        ang: Math.random() * TAU,
+        size: small ? 6 + Math.random() * 5 : 8 + Math.random() * 7,
+        tw: 1.3 + Math.random() * 2.3,
+        ph: Math.random() * TAU,
+        spr: getSprite(LIGHT_COLORS[j % LIGHT_COLORS.length])
+      }));
+    }
+
+    for (var k = 0; k < ballN; k++) {
+      var ba = LAYERS[k % LAYERS.length];
+      balls.push(zeroMotion({
+        t: ba.t0 + Math.random() * 0.2,
+        t0: ba.t0, t1: ba.t1, rw: ba.rw,
+        rad: 0.72 + Math.random() * 0.26,
+        ang: Math.random() * TAU,
+        size: small ? 9 + Math.random() * 7 : 11 + Math.random() * 10,
+        tw: 0.5 + Math.random() * 0.9,
+        ph: Math.random() * TAU,
+        spr: getSprite(BALL_COLORS[k % BALL_COLORS.length])
+      }));
+    }
+
+    for (var tr = 0; tr < trunkN; tr++) {
+      trunk.push(zeroMotion({
+        dx: (Math.random() - 0.5) * geo.treeR * 0.2,
+        dz: (Math.random() - 0.5) * geo.treeR * 0.2,
+        dy: Math.random() * 0.055,
+        size: 5 + Math.random() * 6,
+        alpha: 0.12 + Math.random() * 0.16,
+        tw: 0.6 + Math.random() * 1.4,
+        ph: Math.random() * TAU,
+        spr: getSprite([120, 82, 44])
+      }));
+    }
+
+    var DUST = small ? 22 : 46;
+    for (var d = 0; d < DUST; d++) {
+      dust.push({
+        ang: Math.random() * TAU,
+        rad: 0.15 + Math.random() * 0.85,
+        y: Math.random(),
+        vy: 0.05 + Math.random() * 0.07,
+        size: 2 + Math.random() * 3,
+        ph: Math.random() * TAU,
+        spr: getSprite(GOLD)
+      });
+    }
+  }
+
+  /* 爆散 / 收拢：所有粒子共用的偏移物理 */
+  function stepOffsets(list, dt) {
+    for (var i = 0; i < list.length; i++) {
+      var p = list[i];
+
+      if (treeState === 'text') {
+        /* 飞向文字目标点 */
+        var ft = 1 - Math.exp(-5 * dt);
+        p.bx += ((p.tx || 0) - p.bx) * ft;
+        p.by += ((p.ty || 0) - p.by) * ft;
+        p.bz += ((p.tz || 0) - p.bz) * ft;
+        p.bvx = 0;
+        p.bvy = 0;
+        p.bvz = 0;
+      } else if (treeState === 'chaos') {
+        p.bx += p.bvx * dt;
+        p.by += p.bvy * dt;
+        p.bz += p.bvz * dt;
+
+        var dc = Math.exp(-0.55 * dt);
+        p.bvx *= dc;
+        p.bvy *= dc;
+        p.bvz *= dc;
+
+        /* 湍流，让粒子持续乱窜 */
+        var tb = geo.treeH * 0.9 * dt;
+        p.bvx += Math.sin(time * 2.7 + p.ph) * tb;
+        p.bvz += Math.cos(time * 2.1 + p.ph) * tb;
+        p.bvy += Math.sin(time * 1.6 + p.ph) * tb * 0.6;
+      } else if (treeState === 'burst') {
+        p.bx += p.bvx * dt;
+        p.by += p.bvy * dt;
+        p.bz += p.bvz * dt;
+        var dm = Math.exp(-1.05 * dt);
+        p.bvx *= dm;
+        p.bvy *= dm;
+        p.bvz *= dm;
+      } else {
+        var f = 1 - Math.exp(-7 * dt);
+        p.bx -= p.bx * f;
+        p.by -= p.by * f;
+        p.bz -= p.bz * f;
+        p.bvx = 0;
+        p.bvy = 0;
+        p.bvz = 0;
+      }
+    }
+  }
+
+  function burstTree() {
+    if (treeState === 'burst') return;
+    treeState = 'burst';
+
+    var H = geo.treeH;
+    [particles, bulbs, balls, trunk].forEach(function (list) {
+      for (var i = 0; i < list.length; i++) {
+        var p = list[i];
+        var ang = (p.ang === undefined) ? Math.random() * TAU : p.ang;
+        var sp = H * (0.5 + Math.random() * 1.3);
+
+        p.bvx = Math.cos(ang) * sp + (Math.random() - 0.5) * H * 0.5;
+        p.bvz = Math.sin(ang) * sp + (Math.random() - 0.5) * H * 0.5;
+        p.bvy = (Math.random() - 0.32) * H * 0.85;
+      }
+    });
+  }
+
+  function collapseTree() {
+    treeState = 'tree';
+    clearTimeout(textTimer);
+    textTimer = 0;
+  }
+
+  /* 「芯」：粒子先疯狂乱飞，3 秒后拼成文字 */
+  function startChaos() {
+    closeLightbox();
+    treeState = 'chaos';
+
+    var H = geo.treeH;
+    [particles, bulbs, balls, trunk].forEach(function (list) {
+      for (var i = 0; i < list.length; i++) {
+        var p = list[i];
+        var ang = (p.ang === undefined) ? Math.random() * TAU : p.ang;
+        var sp = H * (1.2 + Math.random() * 2.4);
+
+        p.bvx = Math.cos(ang) * sp + (Math.random() - 0.5) * H * 1.2;
+        p.bvz = Math.sin(ang) * sp + (Math.random() - 0.5) * H * 1.2;
+        p.bvy = (Math.random() - 0.42) * H * 1.5;
+      }
+    });
+
+    toast('粒子乱飞 · 3 秒后拼字');
+    clearTimeout(textTimer);
+    textTimer = setTimeout(startText, 3000);
+  }
+
+  /* 采样「圣诞节快乐」的像素点，得到文字粒子目标位置 */
+  function buildTextTargets(count) {
+    var W = Math.round(geo.W);
+    var H = Math.round(geo.H);
+
+    var off = document.createElement('canvas');
+    off.width = W;
+    off.height = H;
+    var g = off.getContext('2d');
+
+    var fontSize = Math.min(W / 6.6, H / 3.4);
+    g.font = 'bold ' + Math.round(fontSize) + 'px "PingFang SC","Microsoft YaHei","Hiragino Sans GB",sans-serif';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillStyle = '#fff';
+    g.fillText('圣诞节快乐', W / 2, H * 0.46);
+
+    var data = g.getImageData(0, 0, W, H).data;
+    var step = Math.max(2, Math.round(fontSize / 48));
+    var pts = [];
+
+    for (var y = 0; y < H; y += step) {
+      var rowBase = y * W;
+      for (var x = 0; x < W; x += step) {
+        if (data[(rowBase + x) * 4 + 3] > 128) {
+          pts.push(x, y);
+        }
+      }
+    }
+
+    if (!pts.length) return [];
+
+    var n = pts.length / 2;
+    var out = [];
+    for (var i = 0; i < count; i++) {
+      var k = Math.floor(i * n / count) * 2;
+      out.push({ x: pts[k], y: pts[k + 1] });
+    }
+    return out;
+  }
+
+  function startText() {
+    if (treeState !== 'chaos') return;
+
+    var targets = buildTextTargets(particles.length);
+    if (!targets.length) {
+      collapseTree();
+      return;
+    }
+
+    var treeH = geo.treeH;
+    var treeR = geo.treeR;
+    var zoom = 1;   /* 文字阶段视野会归位到 1 倍 */
+
+    for (var i = 0; i < particles.length; i++) {
+      var p = particles[i];
+      var tgt = targets[i];
+
+      /* 粒子当前的基础世界坐标（t 在此之后不再流动） */
+      var lt = (p.t - p.t0) / (p.t1 - p.t0);
+      var r = treeR * p.rw * (1 - lt) * p.rad;
+      var ang = p.ang + p.sw * p.t;
+      var bx0 = Math.cos(ang) * r;
+      var by0 = (0.52 - p.t) * treeH;
+      var bz0 = Math.sin(ang) * r;
+
+      /* 屏幕点反算到 z=0 平面的世界坐标 */
+      var wx = (tgt.x - geo.cx) / zoom;
+      var wy = (tgt.y - geo.pivotY) / zoom;
+
+      p.tx = wx - bx0;
+      p.ty = wy - by0;
+      p.tz = -bz0;
+      p.vy = 0;
+    }
+
+    /* 彩灯 / 装饰球 / 树干在文字模式下隐藏，先回归原位 */
+    [bulbs, balls, trunk].forEach(function (list) {
+      for (var j = 0; j < list.length; j++) {
+        list[j].tx = 0;
+        list[j].ty = 0;
+        list[j].tz = 0;
+      }
+    });
+
+    treeState = 'text';
+    toast('圣诞节快乐');
+  }
+
+  function buildStars() {
+    var count = Math.round(geo.W * geo.H / 16000);
+    stars = [];
+    for (var i = 0; i < count; i++) {
+      stars.push({
+        x: Math.random() * geo.W,
+        y: Math.random() * geo.H * 0.9,
+        r: Math.random() * 1.1 + 0.2,
+        a: Math.random() * 0.5 + 0.12,
+        p: Math.random() * TAU
+      });
+    }
+  }
+
+  function buildFlakes() {
+    var count = Math.round(Math.min(150, geo.W * geo.H / 13000));
+    flakes = [];
+    for (var i = 0; i < count; i++) {
+      flakes.push({
+        x: Math.random() * geo.W,
+        y: Math.random() * geo.H,
+        r: Math.random() * 1.7 + 0.5,
+        vy: Math.random() * 0.55 + 0.22,
+        vx: (Math.random() - 0.5) * 0.3,
+        a: Math.random() * 0.4 + 0.26,
+        p: Math.random() * TAU
+      });
+    }
+  }
+
+  function sizeCanvas() {
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    geo.dpr = dpr;
+    el.scene.width = Math.round(geo.W * dpr);
+    el.scene.height = Math.round(geo.H * dpr);
+    el.scene.style.width = geo.W + 'px';
+    el.scene.style.height = geo.H + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  /* ================================================================
+     5. 投影与绘制
+     ================================================================ */
+  var time = 0;
+  var lastTs = 0;
+
+  function project(wx, wy, wz) {
+    var x1 = wx * cosY + wz * sinY;
+    var z1 = -wx * sinY + wz * cosY;
+    var y1 = wy * cosX - z1 * sinX;
+    var z2 = wy * sinX + z1 * cosX;
+
+    var D = geo.camDist;
+    var F = D * view.zoom;
+    var s = F / (D + z2);
+
+    return {
+      x: geo.cx + x1 * s,
+      y: geo.pivotY + y1 * s,
+      z: z2,
+      s: s
+    };
+  }
+
+  function updateView(dt) {
+    if (treeState === 'chaos') {
+      /* 疯狂旋转 */
+      view.rotY += dt * 2.8;
+      view.rotX = Math.sin(time * 1.15) * 0.18;
+    } else if (treeState === 'text') {
+      /* 文字必须正对屏幕 */
+      var fz = Math.min(1, dt * 4);
+      view.rotY += (0 - view.rotY) * fz;
+      view.rotX += (0 - view.rotX) * fz;
+    } else if (!drag.active && performance.now() - lastInteract > 2200) {
+      view.rotY += dt * CONFIG.autoSpin;
+    }
+
+    if (treeState === 'text') {
+      view.zoom += (1 - view.zoom) * Math.min(1, dt * 3);
+    } else {
+      view.zoom += (view.zoomTarget - view.zoom) * Math.min(1, dt * 5.5);
+    }
+
+    cosY = Math.cos(view.rotY);
+    sinY = Math.sin(view.rotY);
+    cosX = Math.cos(view.rotX);
+    sinX = Math.sin(view.rotX);
+  }
+
+  function draw(dt) {
+    var W = geo.W, H = geo.H;
+    var treeH = geo.treeH, treeR = geo.treeR;
+    var D = geo.camDist;
+    var F = D * view.zoom;
+    var textMode = treeState === 'text';
+
+    ctx.clearRect(0, 0, W, H);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+
+    /* --- 星空 --- */
+    for (var i = 0; i < stars.length; i++) {
+      var st = stars[i];
+      var sa = st.a * (0.55 + 0.45 * Math.sin(time / 900 + st.p));
+      ctx.beginPath();
+      ctx.arc(st.x, st.y, st.r, 0, TAU);
+      ctx.fillStyle = 'rgba(210,230,255,' + sa.toFixed(3) + ')';
+      ctx.fill();
+    }
+
+    /* --- 树后的绿色体积光 --- */
+    if (!textMode) {
+      var aura = project(0, -treeH * 0.05, 0);
+      var auraR = treeH * 0.68 * aura.s;
+      var ag = ctx.createRadialGradient(aura.x, aura.y, 0, aura.x, aura.y, auraR);
+      ag.addColorStop(0, 'rgba(40,158,108,' + (0.10 + 0.04 * (view.zoom - 1)).toFixed(3) + ')');
+      ag.addColorStop(0.55, 'rgba(32,130,90,.055)');
+      ag.addColorStop(1, 'rgba(32,130,90,0)');
+      ctx.fillStyle = ag;
+      ctx.fillRect(aura.x - auraR, aura.y - auraR, auraR * 2, auraR * 2);
+
+      /* --- 地面雪光 --- */
+      var ground = project(0, treeH * 0.53, 0);
+      var gr = treeH * 0.52 * ground.s;
+      ctx.save();
+      ctx.translate(ground.x, ground.y);
+      ctx.scale(1, 0.26);
+      var gg = ctx.createRadialGradient(0, 0, 0, 0, 0, gr);
+      gg.addColorStop(0, 'rgba(222,240,255,.22)');
+      gg.addColorStop(0.45, 'rgba(150,196,240,.08)');
+      gg.addColorStop(1, 'rgba(150,196,240,0)');
+      ctx.fillStyle = gg;
+      ctx.beginPath();
+      ctx.arc(0, 0, gr, 0, TAU);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    /* --- 树体粒子（三层结构，真 3D 投影） --- */
+    stepOffsets(particles, dt);
+    stepOffsets(bulbs, dt);
+    stepOffsets(balls, dt);
+    stepOffsets(trunk, dt);
+
+    ctx.globalCompositeOperation = 'lighter';
+
+    var sizeScale = treeH / 620;
+
+    for (var j = 0; j < particles.length; j++) {
+      var p = particles[j];
+
+      if (p.vy && !textMode) {
+        p.t += p.vy * dt;
+        if (p.t > p.t1) p.t = p.t0;
+      }
+
+      var lt = (p.t - p.t0) / (p.t1 - p.t0);
+      var r = treeR * p.rw * (1 - lt) * p.rad;
+      var ang = p.ang + p.sw * p.t;
+      var ca = Math.cos(ang), sn = Math.sin(ang);
+
+      var wx = ca * r + p.bx;
+      var wy = (0.52 - p.t) * treeH + p.by;
+      var wz = sn * r + p.bz;
+
+      var x1 = wx * cosY + wz * sinY;
+      var z1 = -wx * sinY + wz * cosY;
+      var y1 = wy * cosX - z1 * sinX;
+      var z2 = wy * sinX + z1 * cosX;
+
+      var s = F / (D + z2);
+      var sx = geo.cx + x1 * s;
+      var sy = geo.pivotY + y1 * s;
+
+      var depth = (z2 + treeR) / (treeR * 2);       // 0 近 / 1 远
+      var shade = 1.12 - depth * 0.55;
+
+      var size = p.size * s * sizeScale * (textMode ? 1.0 : 1.45);
+      var alpha = p.alpha * shade * (0.6 + 0.4 * Math.sin(time * p.tw + p.ph));
+
+      if (textMode) {
+        alpha = Math.min(1, alpha * 1.35 + 0.18);
+      }
+
+      if (size < 0.5 || alpha < 0.015) continue;
+
+      ctx.globalAlpha = Math.min(1, alpha);
+      ctx.drawImage(p.spr, sx - size / 2, sy - size / 2, size, size);
+    }
+
+    /* --- 装饰球 --- */
+    for (var o = 0; o < (textMode ? 0 : balls.length); o++) {
+      var bo = balls[o];
+      var blt = (bo.t - bo.t0) / (bo.t1 - bo.t0);
+      var brr = treeR * bo.rw * (1 - blt) * bo.rad;
+      var bwx = Math.cos(bo.ang) * brr + bo.bx;
+      var bwy = (0.52 - bo.t) * treeH + bo.by;
+      var bwz = Math.sin(bo.ang) * brr + bo.bz;
+
+      var ox1 = bwx * cosY + bwz * sinY;
+      var oz1 = -bwx * sinY + bwz * cosY;
+      var oy1 = bwy * cosX - oz1 * sinX;
+      var oz2 = bwy * sinX + oz1 * cosX;
+
+      var os = F / (D + oz2);
+      var opx = geo.cx + ox1 * os;
+      var opy = geo.pivotY + oy1 * os;
+      var oSize = bo.size * os * sizeScale * 1.1;
+      var glow = 0.62 + 0.38 * Math.sin(time * bo.tw + bo.ph);
+
+      ctx.globalAlpha = 0.42 + 0.58 * glow;
+      ctx.drawImage(bo.spr, opx - oSize / 2, opy - oSize / 2, oSize, oSize);
+    }
+
+    /* --- 彩灯 --- */
+    for (var b = 0; b < (textMode ? 0 : bulbs.length); b++) {
+      var blm = bulbs[b];
+      var blt2 = (blm.t - blm.t0) / (blm.t1 - blm.t0);
+      var br = treeR * blm.rw * (1 - blt2) * blm.rad;
+      var bx0 = Math.cos(blm.ang) * br + blm.bx;
+      var bz0 = Math.sin(blm.ang) * br + blm.bz;
+      var by0 = (0.52 - blm.t) * treeH + blm.by;
+
+      var bx1 = bx0 * cosY + bz0 * sinY;
+      var bz1 = -bx0 * sinY + bz0 * cosY;
+      var by1 = by0 * cosX - bz1 * sinX;
+      var bz2 = by0 * sinX + bz1 * cosX;
+
+      var bs = F / (D + bz2);
+      var bpx = geo.cx + bx1 * bs;
+      var bpy = geo.pivotY + by1 * bs;
+
+      var blink = 0.5 + 0.5 * Math.sin(time * blm.tw + blm.ph);
+      var bsize = blm.size * bs * sizeScale * 1.45 * (0.85 + 0.35 * blink);
+
+      ctx.globalAlpha = 0.32 + 0.68 * blink;
+      ctx.drawImage(blm.spr, bpx - bsize / 2, bpy - bsize / 2, bsize, bsize);
+    }
+
+    /* --- 树干 --- */
+    for (var tt = 0; tt < (textMode ? 0 : trunk.length); tt++) {
+      var tk = trunk[tt];
+      var twx = tk.dx + tk.bx;
+      var twy = (0.52 + tk.dy) * treeH + tk.by;
+      var twz = tk.dz + tk.bz;
+
+      var tx1 = twx * cosY + twz * sinY;
+      var tz1 = -twx * sinY + twz * cosY;
+      var ty1 = twy * cosX - tz1 * sinX;
+      var tz2 = twy * sinX + tz1 * cosX;
+
+      var ts = F / (D + tz2);
+      var tpx = geo.cx + tx1 * ts;
+      var tpy = geo.pivotY + ty1 * ts;
+      var tSize = tk.size * ts * sizeScale;
+
+      ctx.globalAlpha = tk.alpha * (0.7 + 0.3 * Math.sin(time * tk.tw + tk.ph));
+      ctx.drawImage(tk.spr, tpx - tSize / 2, tpy - tSize / 2, tSize, tSize);
+    }
+
+    /* --- 树顶星 --- */
+    if (!textMode && treeState !== 'chaos') {
+      var star = project(0, -treeH * 0.64, 0);
+      var starR = treeH * 0.052 * star.s;
+      var pulse = 0.8 + 0.2 * Math.sin(time * 2.1);
+
+      var sg = ctx.createRadialGradient(star.x, star.y, 0, star.x, star.y, starR * 3.1);
+      sg.addColorStop(0, 'rgba(255,251,228,' + (0.82 * pulse).toFixed(3) + ')');
+      sg.addColorStop(0.26, 'rgba(255,228,158,' + (0.34 * pulse).toFixed(3) + ')');
+      sg.addColorStop(1, 'rgba(255,182,84,0)');
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = sg;
+      ctx.beginPath();
+      ctx.arc(star.x, star.y, starR * 3.1, 0, TAU);
+      ctx.fill();
+
+      ctx.save();
+      ctx.translate(star.x, star.y);
+      ctx.rotate(time * 0.32);
+      ctx.fillStyle = 'rgba(255,250,226,' + (0.88 * pulse).toFixed(3) + ')';
+      for (var k = 0; k < 4; k++) {
+        ctx.beginPath();
+        ctx.moveTo(0, -starR * 0.3);
+        ctx.lineTo(starR * 0.2, 0);
+        ctx.lineTo(0, starR * 1.8);
+        ctx.lineTo(-starR * 0.2, 0);
+        ctx.closePath();
+        ctx.fill();
+        ctx.rotate(Math.PI / 2);
+      }
+      ctx.restore();
+
+      ctx.fillStyle = 'rgba(255,252,236,' + (0.9 * pulse).toFixed(3) + ')';
+      ctx.beginPath();
+      ctx.arc(star.x, star.y, starR * 0.36, 0, TAU);
+      ctx.fill();
+    }
+
+    /* --- 金粉 --- */
+    for (var d = 0; d < (textMode ? 0 : dust.length); d++) {
+      var du = dust[d];
+      du.y += du.vy * dt;
+      if (du.y > 1) { du.y = 0; du.rad = 0.15 + Math.random() * 0.85; }
+
+      var dr = treeR * du.rad;
+      var dAng = du.ang + du.y * 2.4;
+      var dwx = Math.cos(dAng) * dr;
+      var dwz = Math.sin(dAng) * dr;
+      var dwy = (-0.64 + du.y * 1.2) * treeH;
+
+      var dx1 = dwx * cosY + dwz * sinY;
+      var dz1 = -dwx * sinY + dwz * cosY;
+      var dy1 = dwy * cosX - dz1 * sinX;
+      var dz2 = dwy * sinX + dz1 * cosX;
+
+      var ds = F / (D + dz2);
+      var dpx = geo.cx + dx1 * ds;
+      var dpy = geo.pivotY + dy1 * ds;
+      var dsz = du.size * ds * sizeScale * 1.4;
+
+      ctx.globalAlpha = 0.3 + 0.3 * (0.5 + 0.5 * Math.sin(time * 1.6 + du.ph));
+      ctx.drawImage(du.spr, dpx - dsz / 2, dpy - dsz / 2, dsz, dsz);
+    }
+
+    /* --- 雪 --- */
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+
+    if (snowOn) {
+      for (var f = 0; f < flakes.length; f++) {
+        var fl = flakes[f];
+        fl.y += fl.vy;
+        fl.x += fl.vx + Math.sin(time + fl.p) * 0.22;
+
+        if (fl.y > H + 4) { fl.y = -4; fl.x = Math.random() * W; }
+        if (fl.x > W + 4) fl.x = -4;
+        if (fl.x < -4) fl.x = W + 4;
+
+        ctx.beginPath();
+        ctx.arc(fl.x, fl.y, fl.r, 0, TAU);
+        ctx.fillStyle = 'rgba(232,244,255,' + fl.a.toFixed(2) + ')';
+        ctx.fill();
+      }
+    }
+  }
+
+  /* 挂饰：正常时跟随 3D 树；爆散后飞向左下角并透明化 */
+  function updateOrnaments3D(dt) {
+    var D = geo.camDist;
+    var F = D * view.zoom;
+    var f = 1 - Math.exp(-9 * (dt || 0.016));
+    var corner = treeState !== 'tree';
+
+    for (var i = 0; i < slotNodes.length; i++) {
+      var node = slotNodes[i];
+      var tx, ty, tk, to, tz;
+
+      if (corner) {
+        var col = i % 4;
+        var row = Math.floor(i / 4);
+        tx = 30 + col * 30;
+        ty = geo.H - 122 - row * 34;
+        tk = 0.36;
+        to = 0.26;
+        tz = 70 - i;
+      } else {
+        var slot = SLOTS[Number(node.dataset.slot)];
+
+        var edge = Math.pow(1 - slot.t, 1.06);
+        var rr = geo.treeR * edge + geo.frameW * 0.52;
+        var ang = slot.side > 0 ? -0.30 : Math.PI + 0.30;
+
+        var wx = Math.cos(ang) * rr;
+        var wz = Math.sin(ang) * rr;
+        var wy = (0.52 - slot.t) * geo.treeH;
+
+        var x1 = wx * cosY + wz * sinY;
+        var z1 = -wx * sinY + wz * cosY;
+        var y1 = wy * cosX - z1 * sinX;
+        var z2 = wy * sinX + z1 * cosX;
+
+        var s = F / (D + z2);
+        var depth = Math.min(1, Math.max(0, (z2 + geo.treeR) / (geo.treeR * 2)));
+
+        tx = geo.cx + x1 * s;
+        ty = geo.pivotY + y1 * s;
+        tk = s;
+        to = 1 - depth * 0.38;
+        tz = 60 - Math.round(depth * 30);
+      }
+
+      if (node._x === undefined) {
+        node._x = tx; node._y = ty; node._k = tk; node._o = to;
+      } else {
+        node._x += (tx - node._x) * f;
+        node._y += (ty - node._y) * f;
+        node._k += (tk - node._k) * f;
+        node._o += (to - node._o) * f;
+      }
+
+      node.style.left = node._x.toFixed(1) + 'px';
+      node.style.top = node._y.toFixed(1) + 'px';
+      node.style.setProperty('--k', node._k.toFixed(3));
+      node.style.opacity = node._o.toFixed(2);
+      node.style.zIndex = String(tz);
+    }
+  }
+
+  function loop(ts) {
+    var dt = lastTs ? Math.min(0.06, (ts - lastTs) / 1000) : 0.016;
+    lastTs = ts;
+    time += dt;
+
+    updateView(dt);
+    draw(dt);
+    updateOrnaments3D(dt);
+
+    requestAnimationFrame(loop);
+  }
+
+  /* ================================================================
+     6. 挂饰
+     ================================================================ */
+  function slotIndicesFor(n) {
+    if (n === 1) return [1];
+    var out = [];
+    for (var i = 0; i < n; i++) {
+      out.push(Math.round(i * (SLOTS.length - 1) / (n - 1)));
+    }
+    return out;
+  }
+
+  function createOrnament(slot, photoIndex) {
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ornament';
+    btn.dataset.slot = String(slot);
+
+    var inner = document.createElement('span');
+    inner.className = 'ornament-inner';
+
+    var rope = document.createElement('span');
+    rope.className = 'rope';
+    var cap = document.createElement('span');
+    cap.className = 'cap';
+    var frame = document.createElement('span');
+    frame.className = 'frame';
+
+    if (photoIndex === null || photoIndex === undefined) {
+      btn.classList.add('empty');
+      btn.dataset.photo = '';
+      var plus = document.createElement('span');
+      plus.className = 'plus';
+      plus.textContent = '＋';
+      frame.appendChild(plus);
+      btn.setAttribute('aria-label', '添加照片');
+      btn.addEventListener('click', pickFiles);
+    } else {
+      btn.dataset.photo = String(photoIndex);
+      var img = document.createElement('img');
+      img.src = photos[photoIndex].url;
+      img.alt = photos[photoIndex].name || '';
+      img.draggable = false;
+      frame.appendChild(img);
+      btn.setAttribute('aria-label', photos[photoIndex].name || '照片');
+      btn.addEventListener('click', function () {
+        openLightbox(Number(btn.dataset.photo) || 0);
+      });
+    }
+
+    inner.appendChild(rope);
+    inner.appendChild(cap);
+    inner.appendChild(frame);
+    btn.appendChild(inner);
+
+    btn.style.width = geo.frameW + 'px';
+    btn.style.setProperty('--dur', (6 + Math.random() * 3).toFixed(2) + 's');
+    btn.style.setProperty('--delay', (-Math.random() * 4).toFixed(2) + 's');
+    return btn;
+  }
+
+  function renderOrnaments() {
+    el.hangLayer.innerHTML = '';
+    slotNodes = [];
+
+    var n = photos.length;
+    var plan = [];
+
+    if (n === 0) {
+      /* 没有照片时不显示任何占位框，保持纯净的树 */
+      return;
+    } else if (n <= SLOTS.length) {
+      slotIndicesFor(n).forEach(function (slot, i) {
+        plan.push({ slot: slot, photo: i });
+      });
+    } else {
+      SLOTS.forEach(function (_, slot) {
+        plan.push({ slot: slot, photo: (offset + slot) % n });
+      });
+    }
+
+    plan.forEach(function (item) {
+      var node = createOrnament(item.slot, item.photo);
+      el.hangLayer.appendChild(node);
+      slotNodes.push(node);
+    });
+
+    updateOrnaments3D(1);
+  }
+
+  /* ================================================================
+     7. 胶片条 / 提示 / 按钮
+     ================================================================ */
+  function renderFilmstrip() {
+    el.filmstrip.innerHTML = '';
+
+    photos.forEach(function (p, i) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'thumb';
+      b.dataset.index = String(i);
+      var img = document.createElement('img');
+      img.src = p.url;
+      img.alt = p.name || '';
+      img.draggable = false;
+      b.appendChild(img);
+      b.addEventListener('click', function () { openLightbox(i); });
+      el.filmstrip.appendChild(b);
+    });
+
+    var add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'thumb add';
+    add.title = '添加照片';
+    add.textContent = '＋';
+    add.addEventListener('click', pickFiles);
+    el.filmstrip.appendChild(add);
+
+    el.dock.hidden = photos.length === 0;
+    markActiveThumb();
+  }
+
+  function markActiveThumb() {
+    var list = el.filmstrip.querySelectorAll('.thumb[data-index]');
+    Array.prototype.forEach.call(list, function (t) {
+      t.classList.toggle('active', Number(t.dataset.index) === activeIndex);
+    });
+  }
+
+  function updateHero() {
+    el.heroSub.textContent = photos.length
+      ? '已挂上 ' + photos.length + ' 张回忆 · 握拳收拢 · 张开绽放 · 比 OK 弹照片'
+      : '握拳收拢 · 张开绽放 · 比 OK 弹照片 · 拖动可旋转';
+  }
+
+  function syncRotateButton() {
+    var usable = photos.length > SLOTS.length;
+    el.btnRotate.disabled = !usable;
+
+    if (!usable && rotateTimer) {
+      stopRotate();
+      autoRotate = false;
+    }
+    el.btnRotate.setAttribute('aria-pressed', String(autoRotate && usable));
+
+    if (autoRotate && usable && !rotateTimer) startRotate();
+  }
+
+  function renderAll() {
+    renderOrnaments();
+    renderFilmstrip();
+    updateHero();
+    syncRotateButton();
+  }
+
+  /* ================================================================
+     8. 照片增删
+     ================================================================ */
+  function addFiles(fileList) {
+    var images = Array.prototype.filter.call(fileList || [], function (f) {
+      return f && f.type && f.type.indexOf('image/') === 0;
+    });
+    if (!images.length) return;
+
+    var startIndex = photos.length;
+    images.forEach(function (file) {
+      photos.push({
+        url: URL.createObjectURL(file),
+        name: (file.name || '照片').replace(/\.[^.]+$/, ''),
+        blob: true
+      });
+    });
+
+    offset = 0;
+    activeIndex = startIndex;
+
+    renderAll();
+    el.dock.hidden = false;
+
+    requestAnimationFrame(function () {
+      var last = el.filmstrip.querySelector('.thumb[data-index="' + (photos.length - 1) + '"]');
+      if (last && last.scrollIntoView) {
+        last.scrollIntoView({ inline: 'end', block: 'nearest', behavior: 'smooth' });
+      }
+    });
+  }
+
+  function removePhoto(index) {
+    if (index < 0 || index >= photos.length) return;
+    var item = photos[index];
+    if (item.blob) URL.revokeObjectURL(item.url);
+    photos.splice(index, 1);
+    offset = 0;
+
+    if (!photos.length) {
+      activeIndex = 0;
+      closeLightbox();
+    } else {
+      activeIndex = Math.min(index, photos.length - 1);
+      if (el.lightbox.classList.contains('open')) updateLightbox();
+    }
+    renderAll();
+  }
+
+  function pickFiles() {
+    el.fileInput.value = '';
+    el.fileInput.click();
+  }
+
+  /* ================================================================
+     9. 灯箱
+     ================================================================ */
+  function openLightbox(index) {
+    if (!photos.length) return;
+    activeIndex = (index + photos.length) % photos.length;
+    updateLightbox();
+    el.lightbox.classList.add('open');
+    el.lightbox.classList.remove('soft');
+    el.lightbox.setAttribute('aria-hidden', 'false');
+    markActiveThumb();
+  }
+
+  function closeLightbox() {
+    el.lightbox.classList.remove('open');
+    el.lightbox.setAttribute('aria-hidden', 'true');
+  }
+
+  function updateLightbox() {
+    var p = photos[activeIndex];
+    if (!p) return;
+    el.lbImg.src = p.url;
+    el.lbImg.alt = p.name || '';
+    el.lbCap.textContent = p.name || '';
+    el.lbCounter.textContent = (activeIndex + 1) + ' / ' + photos.length;
+
+    el.lbImg.classList.remove('swap');
+    void el.lbImg.offsetWidth;
+    el.lbImg.classList.add('swap');
+
+    markActiveThumb();
+  }
+
+  function step(dir) {
+    if (photos.length < 2) return;
+    activeIndex = (activeIndex + dir + photos.length) % photos.length;
+    updateLightbox();
+  }
+
+  /* ================================================================
+     10. 挂饰轮换
+     ================================================================ */
+  function startRotate() {
+    stopRotate();
+    rotateTimer = setInterval(function () {
+      if (document.hidden || photos.length <= SLOTS.length) return;
+      offset = (offset + 1) % photos.length;
+
+      slotNodes.forEach(function (node) {
+        if (node.classList.contains('empty') || !node.dataset.photo) return;
+        var slot = Number(node.dataset.slot);
+        var idx = (offset + slot) % photos.length;
+        node.dataset.photo = String(idx);
+        var img = node.querySelector('img');
+        if (img) img.src = photos[idx].url;
+        node.classList.remove('flip');
+        void node.offsetWidth;
+        node.classList.add('flip');
+      });
+    }, 3200);
+  }
+
+  function stopRotate() {
+    if (rotateTimer) {
+      clearInterval(rotateTimer);
+      rotateTimer = null;
+    }
+  }
+
+  /* ================================================================
+     11. 拖动旋转 / 缩放
+     ================================================================ */
+  var drag = { active: false, x: 0, y: 0, rotY: 0, rotX: 0, moved: false };
+
+  function markInteract() {
+    lastInteract = performance.now();
+  }
+
+  document.addEventListener('pointerdown', function (e) {
+    if (e.isPrimary === false) return;
+    var t = e.target;
+    if (t && t.closest && t.closest('.ornament, .btn, .dock, .lightbox, .cam-panel')) return;
+
+    drag.active = true;
+    drag.x = e.clientX;
+    drag.y = e.clientY;
+    drag.rotY = view.rotY;
+    drag.rotX = view.rotX;
+    drag.moved = false;
+    document.body.classList.add('dragging');
+    markInteract();
+  });
+
+  document.addEventListener('pointermove', function (e) {
+    if (!drag.active) return;
+    var dx = e.clientX - drag.x;
+    var dy = e.clientY - drag.y;
+    if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
+
+    view.rotY = drag.rotY + dx * 0.006;
+    view.rotX = Math.max(-0.24, Math.min(0.3, drag.rotX + dy * 0.0025));
+    markInteract();
+  });
+
+  window.addEventListener('pointerup', function () {
+    if (!drag.active) return;
+    drag.active = false;
+    document.body.classList.remove('dragging');
+    markInteract();
+  });
+
+  window.addEventListener('pointercancel', function () {
+    drag.active = false;
+    document.body.classList.remove('dragging');
+  });
+
+  window.addEventListener('wheel', function (e) {
+    if (el.lightbox.classList.contains('open')) return;
+    e.preventDefault();
+    view.zoomTarget = Math.max(0.8, Math.min(1.5, view.zoomTarget - e.deltaY * 0.0012));
+    markInteract();
+  }, { passive: false });
+
+  /* 双指捏合 */
+  var pinch = null;
+
+  function touchDist(touches) {
+    var dx = touches[0].clientX - touches[1].clientX;
+    var dy = touches[0].clientY - touches[1].clientY;
+    return Math.sqrt(dx * dx + dy * dy) || 1;
+  }
+
+  document.addEventListener('touchstart', function (e) {
+    if (e.touches.length === 2) {
+      pinch = { d: touchDist(e.touches), z: view.zoomTarget };
+      drag.active = false;
+    }
+  }, { passive: true });
+
+  document.addEventListener('touchmove', function (e) {
+    if (!pinch || e.touches.length !== 2) return;
+    var nd = touchDist(e.touches);
+    view.zoomTarget = Math.max(0.8, Math.min(1.5, pinch.z * nd / pinch.d));
+  }, { passive: true });
+
+  document.addEventListener('touchend', function (e) {
+    if (e.touches.length < 2) pinch = null;
+  }, { passive: true });
+
+  /* ================================================================
+     12. 摄像头：人脸测距 + 手势识别
+     ================================================================ */
+  var camOn = false;
+  var camStream = null;
+  var detector = null;
+  var detectorLoading = null;
+  var handLandmarker = null;
+  var handLoading = null;
+  var lastDetect = 0;
+  var lastFaceAt = 0;
+  var lastHandAt = 0;
+  var lastOkAt = 0;
+  var camStateText = '';
+  var toastTimer = 0;
+
+  var gesture = { candidate: 'none', frames: 0, stable: 'none' };
+  var GESTURE_LABEL = { fist: '握拳', open: '张开', ok: 'OK', none: '—' };
+
+  function setCamState(text) {
+    if (text === camStateText) return;
+    camStateText = text;
+    el.camState.textContent = text;
+  }
+
+  function setCamTip(text) {
+    el.camTip.textContent = text;
+  }
+
+  function setGestureLabel(g) {
+    el.camGesture.textContent = '手势：' + (GESTURE_LABEL[g] || '—');
+  }
+
+  function toast(text) {
+    el.toast.textContent = text;
+    el.toast.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () {
+      el.toast.classList.remove('show');
+    }, 1600);
+  }
+
+  function loadDetector() {
+    if (detector) return Promise.resolve(detector);
+    if (detectorLoading) return detectorLoading;
+
+    var VERSION = '0.10.14';
+    var CDN = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@' + VERSION;
+    var WASM = CDN + '/wasm';
+    var MODEL = 'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite';
+
+    function create(delegate) {
+      return import(CDN).then(function (mod) {
+        return mod.FilesetResolver.forVisionTasks(WASM).then(function (fileset) {
+          return mod.FaceDetector.createFromOptions(fileset, {
+            baseOptions: {
+              modelAssetPath: MODEL,
+              delegate: delegate
+            },
+            runningMode: 'VIDEO',
+            minDetectionConfidence: 0.35
+          });
+        });
+      });
+    }
+
+    detectorLoading = create('GPU').catch(function () {
+      return create('CPU');
+    }).then(function (det) {
+      detector = det;
+      return det;
+    });
+
+    return detectorLoading;
+  }
+
+  function loadHandLandmarker() {
+    if (handLandmarker) return Promise.resolve(handLandmarker);
+    if (handLoading) return handLoading;
+
+    var VERSION = '0.10.14';
+    var CDN = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@' + VERSION;
+    var WASM = CDN + '/wasm';
+    var MODEL = 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
+
+    function create(delegate) {
+      return import(CDN).then(function (mod) {
+        return mod.FilesetResolver.forVisionTasks(WASM).then(function (fileset) {
+          return mod.HandLandmarker.createFromOptions(fileset, {
+            baseOptions: {
+              modelAssetPath: MODEL,
+              delegate: delegate
+            },
+            runningMode: 'VIDEO',
+            numHands: 1,
+            minHandDetectionConfidence: 0.5,
+            minHandPresenceConfidence: 0.5,
+            minTrackingConfidence: 0.5
+          });
+        });
+      });
+    }
+
+    handLoading = create('GPU').catch(function () {
+      return create('CPU');
+    }).then(function (hl) {
+      handLandmarker = hl;
+      return hl;
+    });
+
+    return handLoading;
+  }
+
+  function startCamera() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      el.camPanel.classList.add('on');
+      setCamState('当前环境不支持摄像头');
+      setCamTip('请用 http://localhost 或 https 打开页面；仍可拖拽旋转、滚轮缩放');
+      return;
+    }
+
+    el.camPanel.classList.add('on');
+    setCamState('正在请求摄像头权限…');
+    setCamTip('人脸靠近 → 树放大；握拳收拢，张开绽放，比 OK 弹照片');
+
+    navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: 'user',
+        width: { ideal: 640 },
+        height: { ideal: 480 }
+      },
+      audio: false
+    }).then(function (stream) {
+      camStream = stream;
+      el.camVideo.srcObject = stream;
+      return el.camVideo.play().catch(function () {});
+    }).then(function () {
+      camOn = true;
+      el.btnCam.classList.add('on');
+      el.btnCam.setAttribute('aria-pressed', 'true');
+      el.gestureBar.hidden = true;
+      setCamState('正在加载识别模型…（首次约 8MB）');
+
+      return Promise.all([
+        loadDetector().catch(function () { return null; }),
+        loadHandLandmarker().catch(function () { return null; })
+      ]);
+    }).then(function (list) {
+      detector = list[0] || detector;
+      handLandmarker = list[1] || handLandmarker;
+
+      if (!detector && !handLandmarker) {
+        setCamState('识别模型加载失败');
+        setCamTip('请检查网络；仍可拖拽旋转、滚轮缩放');
+        return;
+      }
+      setCamState(detector ? '等待人脸…' : '等待手势…');
+      detectLoop();
+    }).catch(function (err) {
+      camOn = false;
+
+      var code = (err && err.name) || '';
+      var tip = '可点下方手势按钮操作，或拖拽旋转、滚轮缩放';
+
+      if (code === 'NotAllowedError' || code === 'PermissionDeniedError' || code === 'SecurityError') {
+        tip = '权限被拒绝：点地址栏左侧的图标 → 允许摄像头，然后刷新页面';
+      } else if (code === 'NotFoundError' || code === 'DevicesNotFoundError') {
+        tip = '没有检测到摄像头设备，请连接摄像头后重试';
+      } else if (code === 'NotReadableError' || code === 'TrackStartError' || code === 'AbortError') {
+        tip = '摄像头被其他程序占用，请关闭微信/会议软件后重试';
+      } else if (code === 'OverconstrainedError') {
+        tip = '摄像头不支持当前分辨率参数';
+      } else if (!window.isSecureContext) {
+        tip = '当前地址不是安全来源，请用 http://localhost 或 https 打开';
+      }
+
+      setCamState('摄像头不可用' + (code ? ' · ' + code : ''));
+      setCamTip(tip);
+
+      if (camStream) {
+        camStream.getTracks().forEach(function (tr) { tr.stop(); });
+        camStream = null;
+      }
+      el.camVideo.srcObject = null;
+      el.btnCam.classList.remove('on');
+      el.btnCam.setAttribute('aria-pressed', 'false');
+      el.gestureBar.hidden = false;
+    });
+  }
+
+  function stopCamera() {
+    camOn = false;
+    if (camStream) {
+      camStream.getTracks().forEach(function (tr) { tr.stop(); });
+      camStream = null;
+    }
+    el.camVideo.srcObject = null;
+    el.camPanel.classList.remove('on');
+    el.btnCam.classList.remove('on');
+    el.btnCam.setAttribute('aria-pressed', 'false');
+    el.gestureBar.hidden = false;
+    view.zoomTarget = 1;
+    setCamState('等待人脸…');
+    setGestureLabel('none');
+  }
+
+  function detectLoop() {
+    if (!camOn) return;
+    requestAnimationFrame(detectLoop);
+
+    if (!el.camVideo.videoWidth) return;
+
+    var now = performance.now();
+    if (now - lastDetect < 90) return;
+    lastDetect = now;
+
+    if (detector) detectFace(now);
+    if (handLandmarker) detectHand(now);
+  }
+
+  function detectFace(now) {
+    var res;
+    try {
+      res = detector.detectForVideo(el.camVideo, now);
+    } catch (e) {
+      return;
+    }
+
+    var dets = (res && res.detections) ? res.detections : [];
+
+    if (!dets.length) {
+      if (now - lastFaceAt > 700) {
+        view.zoomTarget = 1;
+        if (handLandmarker) setCamState('等待人脸 / 手势…');
+        else setCamState('未检测到人脸，树恢复默认大小');
+      }
+      return;
+    }
+
+    lastFaceAt = now;
+
+    var best = 0;
+    for (var i = 0; i < dets.length; i++) {
+      var bb = dets[i].boundingBox;
+      if (bb && bb.width) {
+        var ratio = bb.width / el.camVideo.videoWidth;
+        if (ratio > best) best = ratio;
+      }
+    }
+    if (!best) return;
+
+    /* 人脸框越宽 → 离镜头越近 → 树越大 */
+    var z = 0.82 + (best - 0.10) * 2.6;
+    z = Math.max(0.82, Math.min(1.45, z));
+    view.zoomTarget = z;
+
+    if (best > 0.30) setCamState('靠得很近 · 树在放大');
+    else if (best > 0.19) setCamState('距离适中');
+    else setCamState('离得较远 · 树在缩小');
+  }
+
+  /* --- 手势判定 --- */
+  function pdist(a, b) {
+    var dx = a.x - b.x;
+    var dy = a.y - b.y;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  function classifyHand(lm) {
+    if (!lm || lm.length < 21) return 'none';
+
+    var palm = pdist(lm[0], lm[9]);
+    if (palm < 1e-4) return 'none';
+
+    function up(tip, pip) {
+      return pdist(lm[tip], lm[0]) > pdist(lm[pip], lm[0]) * 1.1;
+    }
+
+    var idx = up(8, 6);
+    var mid = up(12, 10);
+    var ring = up(16, 14);
+    var pinky = up(20, 18);
+    var count = (idx ? 1 : 0) + (mid ? 1 : 0) + (ring ? 1 : 0) + (pinky ? 1 : 0);
+
+    /* OK：拇指尖与食指尖相触，其余三指伸展 */
+    var okGap = pdist(lm[4], lm[8]) / palm;
+    if (okGap < 0.58 && mid && ring && pinky) return 'ok';
+
+    if (count === 0) return 'fist';
+    if (count >= 3) return 'open';
+    return 'none';
+  }
+
+  function detectHand(now) {
+    var res;
+    try {
+      res = handLandmarker.detectForVideo(el.camVideo, now);
+    } catch (e) {
+      return;
+    }
+
+    var hands = (res && res.landmarks) ? res.landmarks : [];
+
+    if (!hands.length) {
+      if (now - lastHandAt > 380) resetGesture();
+      return;
+    }
+    lastHandAt = now;
+    feedGesture(classifyHand(hands[0]));
+  }
+
+  function feedGesture(g) {
+    if (g === 'none') {
+      gesture.candidate = 'none';
+      gesture.frames = 0;
+      /* OK 一旦离开就解除锁定，下次比 OK 才能再次触发 */
+      if (gesture.stable === 'ok') gesture.stable = 'none';
+      return;
+    }
+
+    if (g !== gesture.candidate) {
+      gesture.candidate = g;
+      gesture.frames = 1;
+      return;
+    }
+
+    gesture.frames++;
+    if (gesture.frames < CONFIG.gestureHoldFrames) return;
+    if (g === gesture.stable) return;
+
+    var prev = gesture.stable;
+    gesture.stable = g;
+    setGestureLabel(g);
+    onGesture(g, prev);
+  }
+
+  function resetGesture() {
+    gesture.candidate = 'none';
+    gesture.frames = 0;
+    gesture.stable = 'none';
+    setGestureLabel('none');
+  }
+
+  function onGesture(g, prev) {
+    if (g === 'fist') {
+      var wasSpecial = treeState !== 'tree';
+      var wasOpen = el.lightbox.classList.contains('open');
+      if (wasSpecial) collapseTree();
+      if (wasOpen) closeLightbox();
+      if (wasSpecial || wasOpen) toast('握拳 · 收拢成树');
+      return;
+    }
+
+    if (g === 'open') {
+      if (prev === 'fist') {
+        burstTree();
+        toast('张开手掌 · 四散绽放');
+      }
+      return;
+    }
+
+    if (g === 'ok') {
+      var now = performance.now();
+      if (now - lastOkAt < CONFIG.okCooldown) return;
+      lastOkAt = now;
+      snapPhoto();
+    }
+  }
+
+  function snapPhoto() {
+    if (!photos.length) {
+      toast('还没有照片 · 点击右上角「添加照片」');
+      return;
+    }
+
+    if (!el.lightbox.classList.contains('open')) {
+      openLightbox(activeIndex);
+    } else {
+      step(1);
+    }
+    el.lightbox.classList.add('soft');
+    toast('OK · 第 ' + (activeIndex + 1) + ' 张');
+  }
+
+  el.btnCam.addEventListener('click', function () {
+    if (camOn) stopCamera(); else startCamera();
+  });
+
+  /* ================================================================
+     13. 其它交互
+     ================================================================ */
+  el.btnAdd.addEventListener('click', pickFiles);
+
+  el.btnCore.addEventListener('click', function () {
+    if (treeState === 'chaos' || treeState === 'text') {
+      collapseTree();
+      toast('收拢成树');
+    } else {
+      startChaos();
+    }
+  });
+
+  /* 无摄像头时，用按钮模拟手势 */
+  el.gestureBar.addEventListener('click', function (e) {
+    var btn = (e.target && e.target.closest) ? e.target.closest('[data-gesture]') : null;
+    if (!btn) return;
+
+    var g = btn.dataset.gesture;
+
+    if (g === 'fist') {
+      collapseTree();
+      closeLightbox();
+      toast('握拳 · 收拢成树');
+    } else if (g === 'open') {
+      burstTree();
+      toast('张开手掌 · 四散绽放');
+    } else if (g === 'ok') {
+      lastOkAt = 0;
+      snapPhoto();
+    }
+  });
+
+  el.btnRotate.addEventListener('click', function () {
+    if (el.btnRotate.disabled) return;
+    autoRotate = !autoRotate;
+    if (autoRotate) startRotate(); else stopRotate();
+    el.btnRotate.setAttribute('aria-pressed', String(autoRotate));
+  });
+
+  el.btnSnow.addEventListener('click', function () {
+    snowOn = !snowOn;
+    el.btnSnow.setAttribute('aria-pressed', String(snowOn));
+  });
+
+  el.fileInput.addEventListener('change', function (e) {
+    addFiles(e.target.files);
+  });
+
+  el.lbPrev.addEventListener('click', function () { step(-1); });
+  el.lbNext.addEventListener('click', function () { step(1); });
+  el.lbClose.addEventListener('click', closeLightbox);
+  el.lbBackdrop.addEventListener('click', closeLightbox);
+  el.lbDel.addEventListener('click', function () { removePhoto(activeIndex); });
+
+  document.addEventListener('keydown', function (e) {
+    if (!el.lightbox.classList.contains('open')) return;
+    if (e.key === 'Escape') closeLightbox();
+    else if (e.key === 'ArrowRight') step(1);
+    else if (e.key === 'ArrowLeft') step(-1);
+  });
+
+  var touchX = null;
+  el.lbFigure.addEventListener('touchstart', function (e) {
+    touchX = e.touches[0].clientX;
+  }, { passive: true });
+  el.lbFigure.addEventListener('touchend', function (e) {
+    if (touchX === null) return;
+    var dx = e.changedTouches[0].clientX - touchX;
+    if (Math.abs(dx) > 46) step(dx < 0 ? 1 : -1);
+    touchX = null;
+  }, { passive: true });
+
+  var dragDepth = 0;
+
+  window.addEventListener('dragenter', function (e) {
+    if (!e.dataTransfer || Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') < 0) return;
+    dragDepth++;
+    el.dropHint.classList.add('show');
+  });
+
+  window.addEventListener('dragover', function (e) {
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+  });
+
+  window.addEventListener('dragleave', function () {
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) el.dropHint.classList.remove('show');
+  });
+
+  window.addEventListener('drop', function (e) {
+    e.preventDefault();
+    dragDepth = 0;
+    el.dropHint.classList.remove('show');
+    if (e.dataTransfer && e.dataTransfer.files) addFiles(e.dataTransfer.files);
+  });
+
+  document.addEventListener('paste', function (e) {
+    if (!e.clipboardData || !e.clipboardData.items) return;
+    var files = [];
+    for (var i = 0; i < e.clipboardData.items.length; i++) {
+      var item = e.clipboardData.items[i];
+      if (item.kind === 'file') {
+        var f = item.getAsFile();
+        if (f) files.push(f);
+      }
+    }
+    if (files.length) addFiles(files);
+  });
+
+  var resizeTick = 0;
+  window.addEventListener('resize', function () {
+    if (resizeTick) return;
+    resizeTick = requestAnimationFrame(function () {
+      resizeTick = 0;
+      layout();
+      sizeCanvas();
+      buildStars();
+      buildFlakes();
+      buildTreeParticles();
+      if (treeState === 'burst') {
+        treeState = 'tree';
+        burstTree();
+      } else if (treeState === 'chaos' || treeState === 'text') {
+        treeState = 'chaos';
+        startText();
+      }
+      slotNodes.forEach(function (n) { n.style.width = geo.frameW + 'px'; });
+      updateOrnaments3D(1);
+    });
+  });
+
+  window.addEventListener('beforeunload', stopCamera);
+
+  /* ================================================================
+     14. 启动
+     ================================================================ */
+  (CONFIG.photos || []).forEach(function (src, i) {
+    photos.push({ url: src, name: '照片 ' + (i + 1), blob: false });
+  });
+
+  layout();
+  sizeCanvas();
+  buildStars();
+  buildFlakes();
+  buildTreeParticles();
+  renderAll();
+
+  lastInteract = performance.now();
+  requestAnimationFrame(loop);
+
+})();
+</script>
+</body>
+</html>
